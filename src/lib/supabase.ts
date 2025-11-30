@@ -1,10 +1,18 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL="https://uzdxoibnuwdasevnpska.supabase.co";
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY="sb_publishable_xDnWa_2be2K-k9payh-TXQ_X1CqTEXt";
+// 1. Solo LEEMOS las variables. No pongas el valor real aquí (ni comillas, ni el link).
+// Vercel se encarga de rellenar esto automáticamente.
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+// 2. Validación de seguridad (opcional pero recomendada)
+if (!supabaseUrl || !supabaseAnonKey) {
+  throw new Error('Faltan las variables de entorno de Supabase');
+}
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
+// --- Tus interfaces están perfectas, déjalas igual ---
 export interface Provider {
   id: string;
   name: string;
