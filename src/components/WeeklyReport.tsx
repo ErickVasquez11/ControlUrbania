@@ -9,12 +9,8 @@ type Adjustment = {
   frecuenciaFee?: number;
   creditoAFavor?: number; 
   creditosAPagar?: number; 
-  
-  // Checkboxes
   enableFrecuencia?: boolean;
   enableCreditoSolicitado?: boolean;
-
-  // NUEVO: Campo para guardar el valor manual de Crédito Solicitado
   creditoSolicitadoManual?: number; 
 };
 
@@ -23,19 +19,23 @@ export function WeeklyReport() {
   const [endDate, setEndDate] = useState('');
   const [rides, setRides] = useState<RideWithDetails[]>([]);
   const [loading, setLoading] = useState(false);
+  
+  // ESTADO NUEVO PARA TODAS LAS UNIDADES
+  const [allUnits, setAllUnits] = useState<any[]>([]);
 
   const [adjustments, setAdjustments] = useState<Record<string, Adjustment>>({});
-
-  // Estados del Modal
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingType, setEditingType] = useState<'unit' | 'provider' | null>(null);
   const [editingName, setEditingName] = useState('');
   const [tempAdjustment, setTempAdjustment] = useState<Adjustment>({});
-  
   const [modalRides, setModalRides] = useState<RideWithDetails[]>([]);
   const [updatingRide, setUpdatingRide] = useState<string | null>(null);
 
   useEffect(() => {
+    // 1. Cargar catálogo de unidades inmediatamente
+    loadAllUnits();
+
+    // 2. Configurar fechas
     const today = new Date();
     const weekStart = new Date(today.setDate(today.getDate() - today.getDay()));
     const weekEnd = new Date(today.setDate(today.getDate() - today.getDay() + 6));
@@ -49,6 +49,20 @@ export function WeeklyReport() {
       setAdjustments({}); 
     }
   }, [startDate, endDate]);
+
+  // --- NUEVA FUNCIÓN PARA CARGAR UNIDADES DIRECTAMENTE ---
+  const loadAllUnits = async () => {
+    const { data, error } = await supabase
+      .from('units')
+      .select('*')
+      .order('name'); 
+      
+    if (error) {
+        console.error("Error al cargar unidades:", error);
+    } else {
+        setAllUnits(data || []);
+    }
+  };
 
   const loadRides = async () => {
     setLoading(true);
@@ -64,16 +78,17 @@ export function WeeklyReport() {
   };
 
   // ==================================================================
-  //           LÓGICA DE CÁLCULO (Unidades)
+  //           LÓGICA DE CÁLCULO
   // ==================================================================
   const calculateUnitTotal = (unitId: string, currentRides: RideWithDetails[]) => {
-    const unitRides = currentRides.filter(r => r.unit_id === unitId);
+    // IMPORTANTE: Aseguramos que los IDs sean del mismo tipo (String) para comparar
+    const unitRides = currentRides.filter(r => String(r.unit_id) === String(unitId));
     const rideCount = unitRides.length;
     
     let totalGrossRides = 0;
     let totalCommission = 0;
     let creditoAFavorCalculado = 0;
-    let creditoSolicitadoAuto = 0; // Lo que suman las carreras automáticamente
+    let creditoSolicitadoAuto = 0;
 
     unitRides.forEach(ride => {
       totalGrossRides += ride.amount || 0;
@@ -84,26 +99,17 @@ export function WeeklyReport() {
 
     const adj = adjustments[unitId] || {};
     
-    // 1. Valores Base (Manuales o Automáticos)
     const cuadreAPagar = adj.cuadreAPagar !== undefined ? adj.cuadreAPagar : 1.00;
-    
-    // Frecuencia Base
     const baseFrecuencia = adj.frecuenciaFee !== undefined ? adj.frecuenciaFee : (rideCount < 5 ? 10.00 : 0.00);
-    
-    // Crédito Solicitado Base (NUEVA LÓGICA)
-    // Si existe un valor manual en ajustes, úsalo. Si no, usa la suma automática de las carreras.
     const baseCreditoSolicitado = adj.creditoSolicitadoManual !== undefined ? adj.creditoSolicitadoManual : creditoSolicitadoAuto;
-
     const creditoAFavor = adj.creditoAFavor !== undefined ? adj.creditoAFavor : creditoAFavorCalculado;
 
-    // 2. Aplicar Checkboxes
     const isFrecuenciaEnabled = adj.enableFrecuencia !== undefined ? adj.enableFrecuencia : true;
     const isCreditoSolicitadoEnabled = adj.enableCreditoSolicitado !== undefined ? adj.enableCreditoSolicitado : true;
 
     const finalFrecuencia = isFrecuenciaEnabled ? baseFrecuencia : 0;
     const finalCreditoSolicitado = isCreditoSolicitadoEnabled ? baseCreditoSolicitado : 0;
 
-    // 3. Cálculo Final Neto
     const neto = (cuadreAPagar + totalCommission + finalFrecuencia + finalCreditoSolicitado) - creditoAFavor;
 
     let totalAPagar = 0;
@@ -113,22 +119,14 @@ export function WeeklyReport() {
 
     return { 
       rides: unitRides, rideCount, totalGrossRides, 
-      creditoSolicitadoAuto, // Valor original automático (para referencia si se necesita)
-      baseCreditoSolicitado, // Valor base (el número que sale en el input)
-      finalCreditoSolicitado, // Valor real aplicado a la suma (puede ser 0 si checkbox off)
-      isCreditoSolicitadoEnabled, 
-      totalCommission, 
-      cuadreAPagar, 
-      baseFrecuencia, 
-      finalFrecuencia, 
-      isFrecuenciaEnabled, 
-      creditoAFavor,
-      totalAPagar, totalARecibir
+      creditoSolicitadoAuto, baseCreditoSolicitado, finalCreditoSolicitado, isCreditoSolicitadoEnabled, 
+      totalCommission, cuadreAPagar, baseFrecuencia, finalFrecuencia, isFrecuenciaEnabled, 
+      creditoAFavor, totalAPagar, totalARecibir
     };
   };
 
   const calculateProviderTotal = (providerId: string, currentRides: RideWithDetails[]) => {
-    const providerRides = currentRides.filter(r => r.provider_id === providerId);
+    const providerRides = currentRides.filter(r => String(r.provider_id) === String(providerId));
     let totalGrossRides = 0;
     let creditosAPagarCalculado = 0; 
     let totalCommission = 0; 
@@ -183,12 +181,8 @@ export function WeeklyReport() {
       frecuenciaFee: (currentData as any).baseFrecuencia, 
       creditoAFavor: (currentData as any).creditoAFavor, 
       creditosAPagar: (currentData as any).creditosAPagar,
-      
-      // Checkboxes
       enableFrecuencia: (currentData as any).isFrecuenciaEnabled ?? true,
       enableCreditoSolicitado: (currentData as any).isCreditoSolicitadoEnabled ?? true,
-
-      // Nuevo Input Manual
       creditoSolicitadoManual: (currentData as any).baseCreditoSolicitado 
     });
 
@@ -206,7 +200,6 @@ export function WeeklyReport() {
     }
   };
 
-  // --- PDF ---
   const generatePDF = (type: 'unit' | 'provider', id: string, name: string) => {
     const pdf = new jsPDF();
     const title = `Reporte Semanal - ${type === 'unit' ? 'Unidad' : 'Proveedor'}: ${name}`;
@@ -250,18 +243,13 @@ export function WeeklyReport() {
         pdf.text(`TOTAL A PAGAR: $${data.totalAPagar.toFixed(2)}`, 14, y);
     } else {
         pdf.text(`Total Bruto: $${data.totalGrossRides.toFixed(2)}`, 14, y); y += 7;
-        
         const txtCreditoSol = data.isCreditoSolicitadoEnabled ? `$${data.finalCreditoSolicitado.toFixed(2)}` : `$0.00 (Desactivado)`;
         pdf.text(`Crédito Solicitado: ${txtCreditoSol}`, 14, y); y += 7;
-        
         pdf.text(`% Retenido: $${data.totalCommission.toFixed(2)}`, 14, y); y += 7;
-        
         const txtFrecuencia = data.isFrecuenciaEnabled ? `$${data.finalFrecuencia.toFixed(2)}` : `$0.00 (Desactivado)`;
         pdf.text(`Frecuencia: ${txtFrecuencia}`, 14, y); y += 7;
-        
         pdf.text(`Cuadre: $${data.cuadreAPagar.toFixed(2)}`, 14, y); y += 7;
         pdf.text(`Crédito a Favor: $${data.creditoAFavor.toFixed(2)}`, 14, y); y += 10;
-        
         pdf.setFont(undefined, 'bold');
         if (data.totalAPagar > 0) pdf.text(`TOTAL A PAGAR: $${data.totalAPagar.toFixed(2)}`, 14, y);
         else pdf.text(`TOTAL A RECIBIR: $${data.totalARecibir.toFixed(2)}`, 14, y);
@@ -273,7 +261,8 @@ export function WeeklyReport() {
     ? (editingType === 'unit' ? calculateUnitTotal(editingId, rides) : calculateProviderTotal(editingId, rides))
     : null;
 
-  const uniqueUnits = Array.from(new Set(rides.map(r => r.unit_id))).map(id => ({ id, name: rides.find(r => r.unit_id === id)?.unit?.name || 'N/A' }));
+  // Ya no filtramos proveedores por uso para simplificar, pero si quieres filtrar providers que no trabajaron, usa la lógica vieja. 
+  // Aquí muestro los proveedores que SÍ tienen carreras en esa semana (lógica original para providers).
   const uniqueProviders = Array.from(new Set(rides.map(r => r.provider_id))).map(id => ({ id, name: rides.find(r => r.provider_id === id)?.provider?.name || 'N/A' }));
 
   return (
@@ -290,11 +279,13 @@ export function WeeklyReport() {
 
       {loading ? <div className="text-center py-8">Cargando...</div> : (
         <div className="space-y-8">
-            {/* SECCIÓN UNIDADES */}
+            {/* SECCIÓN UNIDADES: Mostramos allUnits (Todas) */}
             <div>
                 <h3 className="text-lg font-bold mb-4 bg-gray-100 p-2 rounded">Reportes por Unidad</h3>
+                {allUnits.length === 0 && <p className="text-gray-500 italic">No se encontraron unidades. Revisa permisos de Supabase.</p>}
+                
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    {uniqueUnits.map(u => {
+                    {allUnits.map(u => {
                         const d = calculateUnitTotal(u.id, rides);
                         return (
                             <div key={u.id} className="border p-4 rounded-lg relative hover:shadow-lg transition">
@@ -343,23 +334,18 @@ export function WeeklyReport() {
         </div>
       )}
 
-      {/* --- MODAL DE EDICIÓN --- */}
+      {/* --- MODAL DE EDICIÓN (SIN CAMBIOS) --- */}
       {editingId && modalData && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl h-[90vh] flex flex-col">
-            
             <div className="p-4 border-b flex justify-between items-center bg-gray-50 rounded-t-lg">
               <div><h3 className="text-xl font-bold text-gray-800">Editar: {editingName}</h3></div>
               <button onClick={() => setEditingId(null)} className="text-gray-400 hover:text-red-500"><X className="w-6 h-6" /></button>
             </div>
-
             <div className="flex-1 overflow-auto p-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
-                
-                {/* COLUMNA IZQUIERDA - DETALLES FINANCIEROS */}
+                {/* COLUMNA IZQUIERDA */}
                 <div className="space-y-4 lg:col-span-1 border-r pr-4">
                     <h4 className="font-bold text-gray-700 border-b pb-2">Detalles Financieros</h4>
-                    
-                    {/* 1. Total Bruto */}
                     <div className="flex justify-between items-center py-1">
                         <span className="text-gray-600">Total Bruto:</span>
                         <span className="font-semibold">${modalData.totalGrossRides.toFixed(2)}</span>
@@ -367,78 +353,50 @@ export function WeeklyReport() {
 
                     {editingType === 'unit' ? (
                     <>
-                        {/* 2. Crédito Solicitado (AHORA EDITABLE) */}
                         <div className="bg-gray-50 p-2 rounded">
                             <div className="flex items-center justify-between mb-1">
                                 <div className="flex items-center">
-                                    <input 
-                                        type="checkbox" 
-                                        checked={tempAdjustment.enableCreditoSolicitado ?? true}
-                                        onChange={(e) => setTempAdjustment({...tempAdjustment, enableCreditoSolicitado: e.target.checked})}
-                                        className="w-4 h-4 text-blue-600 rounded mr-2"
-                                    />
+                                    <input type="checkbox" checked={tempAdjustment.enableCreditoSolicitado ?? true} onChange={(e) => setTempAdjustment({...tempAdjustment, enableCreditoSolicitado: e.target.checked})} className="w-4 h-4 text-blue-600 rounded mr-2" />
                                     <label className="text-gray-600 text-sm">Crédito Solicitado</label>
                                 </div>
                             </div>
-                            <input 
-                                type="number" step="0.01" 
-                                className={`w-full border rounded px-2 py-1 text-right ${(tempAdjustment.enableCreditoSolicitado ?? true) ? 'bg-white' : 'bg-gray-200 text-gray-400'}`}
-                                // Si hay valor manual lo usa, si no, usa el automático de las carreras
+                            <input type="number" step="0.01" className={`w-full border rounded px-2 py-1 text-right ${(tempAdjustment.enableCreditoSolicitado ?? true) ? 'bg-white' : 'bg-gray-200 text-gray-400'}`}
                                 value={tempAdjustment.creditoSolicitadoManual ?? (modalData as any).creditoSolicitadoAuto}
                                 onChange={(e) => setTempAdjustment({ ...tempAdjustment, creditoSolicitadoManual: parseFloat(e.target.value) })}
                                 disabled={!(tempAdjustment.enableCreditoSolicitado ?? true)}
                             />
                         </div>
-
-                        {/* 3. % Retenido */}
                         <div className="flex justify-between items-center py-1">
                             <span className="text-gray-600">% Retenido:</span>
                             <span className="font-semibold">${modalData.totalCommission.toFixed(2)}</span>
                         </div>
-
-                        {/* 4. Frecuencia (EDITABLE) */}
                         <div className="bg-gray-50 p-2 rounded">
                             <div className="flex items-center justify-between mb-1">
                                 <div className="flex items-center">
-                                    <input 
-                                        type="checkbox" 
-                                        checked={tempAdjustment.enableFrecuencia ?? true}
-                                        onChange={(e) => setTempAdjustment({...tempAdjustment, enableFrecuencia: e.target.checked})}
-                                        className="w-4 h-4 text-blue-600 rounded mr-2"
-                                    />
+                                    <input type="checkbox" checked={tempAdjustment.enableFrecuencia ?? true} onChange={(e) => setTempAdjustment({...tempAdjustment, enableFrecuencia: e.target.checked})} className="w-4 h-4 text-blue-600 rounded mr-2" />
                                     <label className="text-gray-600 text-sm">Frecuencia</label>
                                 </div>
                             </div>
-                            <input 
-                                type="number" step="0.01" 
-                                className={`w-full border rounded px-2 py-1 text-right ${(tempAdjustment.enableFrecuencia ?? true) ? 'bg-white' : 'bg-gray-200 text-gray-400'}`}
+                            <input type="number" step="0.01" className={`w-full border rounded px-2 py-1 text-right ${(tempAdjustment.enableFrecuencia ?? true) ? 'bg-white' : 'bg-gray-200 text-gray-400'}`}
                                 value={tempAdjustment.frecuenciaFee ?? 0}
                                 onChange={(e) => setTempAdjustment({ ...tempAdjustment, frecuenciaFee: parseFloat(e.target.value) })}
                                 disabled={!(tempAdjustment.enableFrecuencia ?? true)}
                             />
                         </div>
-
-                        {/* 5. Cuadre */}
                         <div className="py-1">
                             <label className="block text-sm text-gray-600 mb-1">Cuadre</label>
-                            <input 
-                                type="number" step="0.01" className="w-full border rounded px-2 py-1 text-right"
+                            <input type="number" step="0.01" className="w-full border rounded px-2 py-1 text-right"
                                 value={tempAdjustment.cuadreAPagar ?? 1.00}
                                 onChange={(e) => setTempAdjustment({ ...tempAdjustment, cuadreAPagar: parseFloat(e.target.value) })}
                             />
                         </div>
-
-                        {/* 6. Crédito a Favor */}
                         <div className="py-1">
                             <label className="block text-sm text-gray-600 mb-1">Crédito a Favor</label>
-                            <input 
-                                type="number" step="0.01" className="w-full border rounded px-2 py-1 text-right text-red-600 font-medium"
+                            <input type="number" step="0.01" className="w-full border rounded px-2 py-1 text-right text-red-600 font-medium"
                                 value={tempAdjustment.creditoAFavor ?? 0}
                                 onChange={(e) => setTempAdjustment({ ...tempAdjustment, creditoAFavor: parseFloat(e.target.value) })}
                             />
                         </div>
-
-                        {/* 7. Total Calculado */}
                         <div className="mt-4 pt-4 border-t">
                             {(modalData as any).totalAPagar > 0 ? (
                                 <div className="flex justify-between items-center">
@@ -454,8 +412,7 @@ export function WeeklyReport() {
                         </div>
                     </>
                     ) : (
-                       // Vista simple para Proveedores
-                       <div className="space-y-4">
+                        <div className="space-y-4">
                             <div>
                                 <label className="text-gray-600 text-sm">Créditos a Pagar</label>
                                 <input type="number" step="0.01" className="w-full border rounded px-2 py-1"
@@ -476,11 +433,10 @@ export function WeeklyReport() {
                                     <span className="text-red-600">${(modalData as any).totalAPagar.toFixed(2)}</span>
                                 </div>
                             </div>
-                       </div>
+                        </div>
                     )}
                 </div>
-
-                {/* COLUMNA DERECHA - LISTA DE CARRERAS */}
+                {/* COLUMNA DERECHA */}
                 <div className="lg:col-span-2 flex flex-col h-full">
                     <h4 className="font-bold text-gray-700 border-b pb-2 mb-2 flex justify-between items-center">
                         <span>Carreras ({modalData.rides.length})</span>
@@ -501,8 +457,7 @@ export function WeeklyReport() {
                                         <td className="p-2 whitespace-nowrap">{ride.date.substring(5)}</td>
                                         <td className="p-2 truncate max-w-[150px]" title={ride.destination}>{ride.destination}</td>
                                         <td className="p-2">
-                                            <input 
-                                                type="number" className="w-20 border rounded px-1 py-1 text-right"
+                                            <input type="number" className="w-20 border rounded px-1 py-1 text-right"
                                                 defaultValue={ride.amount}
                                                 onBlur={(e) => { if (parseFloat(e.target.value) !== ride.amount) handleUpdateRideAmount(ride.id, e.target.value); }}
                                                 disabled={updatingRide === ride.id}
@@ -520,7 +475,6 @@ export function WeeklyReport() {
                     </div>
                 </div>
             </div>
-
             <div className="p-4 border-t bg-gray-50 rounded-b-lg flex justify-end space-x-3">
               <button onClick={() => setEditingId(null)} className="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded">Cancelar</button>
               <button onClick={saveAdjustments} className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center shadow-lg">
